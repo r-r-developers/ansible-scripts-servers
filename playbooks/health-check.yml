@@ -2,6 +2,7 @@
 - name: System Health Check and Monitoring
   hosts: all
   gather_facts: yes
+  # Note: This playbook does NOT need sudo - it only reads system info
   
   vars:
     # Alert thresholds
