@@ -1,7 +1,6 @@
 ---
 - name: System Health Check and Monitoring
   hosts: all
-  become: yes
   gather_facts: yes
   
   vars:
