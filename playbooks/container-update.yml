@@ -13,6 +13,13 @@
     force_pull: no
   
   tasks:
+    - name: Check if Docker is available
+      command: which docker
+      register: docker_check
+      changed_when: false
+      ignore_errors: yes
+      tags: always
+
     - name: Ensure Docker is installed
       apt:
         name: 
@@ -20,6 +27,9 @@
           - docker-compose
         state: present
         update_cache: yes
+      ignore_errors: yes
+      register: docker_install
+      when: docker_check.failed
 
     - name: Ensure Docker service is running
       systemd:
@@ -50,6 +60,7 @@
       loop: "{{ target_containers if target_containers | length > 0 else running_containers.stdout_lines }}"
       register: pull_result
       changed_when: "'Downloaded newer image' in pull_result.stdout or 'Status: Downloaded' in pull_result.stdout"
+      ignore_errors: yes
       when: running_containers.stdout_lines | length > 0
 
     - name: Restart containers with updated images
@@ -59,6 +70,7 @@
         docker restart "$container_name"
       loop: "{{ target_containers if target_containers | length > 0 else running_containers.stdout_lines }}"
       register: restart_result
+      ignore_errors: yes
       when: 
         - running_containers.stdout_lines | length > 0
         - pull_result.changed
