@@ -1,0 +1,42 @@
+---
+- name: Update Linux Server
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Update package cache (Debian/Ubuntu)
+      ansible.builtin.apt:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+      register: apt_cache
+      ignore_errors: true
+
+    - name: Check for available updates (Debian/Ubuntu)
+      ansible.builtin.shell: apt list --upgradable
+      when: ansible_os_family == "Debian"
+      register: check_updates
+      ignore_errors: true
+
+    - name: Output available updates
+      ansible.builtin.debug:
+        msg: "Available updates:\n{{ check_updates.stdout }}"
+      when: ansible_os_family == "Debian"
+
+    - name: Apply updates (Debian/Ubuntu)
+      ansible.builtin.apt:
+        upgrade: dist
+        autoremove: yes
+      when: ansible_os_family == "Debian"
+      ignore_errors: true
+
+    - name: Apply updates (RedHat/CentOS)
+      ansible.builtin.yum:
+        name: "*"
+        state: latest
+      when: ansible_os_family == "RedHat"
+      ignore_errors: true
+
+    - name: Reboot Linux Server
+      ansible.builtin.shell: shutdown -r now
+      ignore_errors: true

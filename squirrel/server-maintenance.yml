@@ -1,18 +1,21 @@
 ---
-- name: Asustor NAS Maintenance
+- name: Linux Server Maintenance
   hosts: all
   become: true
-  gather_facts: false
+  gather_facts: true
 
   tasks:
-    - name: Clean package cache
-      ansible.builtin.shell: /usr/sbin/aus -c
+    - name: Clean package cache (Debian/Ubuntu)
+      ansible.builtin.apt:
+        autoclean: yes
+      when: ansible_os_family == "Debian"
       register: clean_cache
       ignore_errors: true
 
     - name: Output cache cleanup result
       ansible.builtin.debug:
-        msg: "Cache cleanup:\n{{ clean_cache.stdout }}"
+        msg: "Cache cleanup completed"
+      when: ansible_os_family == "Debian"
 
     - name: Check system logs
       ansible.builtin.shell: journalctl -p err -n 50 --no-pager
@@ -28,11 +31,11 @@
       register: log_cleanup
       ignore_errors: true
 
-    - name: Optimize database
-      ansible.builtin.shell: /usr/sbin/aus -o
-      register: optimize_db
+    - name: Clean old temporary files
+      ansible.builtin.shell: find /tmp -type f -atime +7 -delete
+      register: temp_cleanup
       ignore_errors: true
 
-    - name: Output optimization result
+    - name: Output cleanup result
       ansible.builtin.debug:
-        msg: "Database optimization:\n{{ optimize_db.stdout }}"
+        msg: "Temporary files cleaned"

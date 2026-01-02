@@ -1,0 +1,74 @@
+---
+- name: Update Packages on All Servers
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Update apt cache (Debian/Ubuntu)
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+      ignore_errors: true
+
+    - name: Upgrade all apt packages (Debian/Ubuntu)
+      ansible.builtin.apt:
+        upgrade: dist
+        autoremove: yes
+        autoclean: yes
+      when: ansible_os_family == "Debian"
+      register: apt_upgrade
+      ignore_errors: true
+
+    - name: Output apt upgrade results
+      ansible.builtin.debug:
+        msg: "Apt upgrade completed: {{ apt_upgrade.changed | default(false) }}"
+      when: ansible_os_family == "Debian"
+
+    - name: Update yum packages (RedHat/CentOS)
+      ansible.builtin.yum:
+        name: "*"
+        state: latest
+        update_cache: yes
+      when: ansible_os_family == "RedHat" and ansible_distribution_major_version|int < 8
+      register: yum_upgrade
+      ignore_errors: true
+
+    - name: Output yum upgrade results
+      ansible.builtin.debug:
+        msg: "Yum upgrade completed: {{ yum_upgrade.changed | default(false) }}"
+      when: ansible_os_family == "RedHat" and ansible_distribution_major_version|int < 8
+
+    - name: Update dnf packages (RedHat/CentOS 8+)
+      ansible.builtin.dnf:
+        name: "*"
+        state: latest
+        update_cache: yes
+      when: ansible_os_family == "RedHat" and ansible_distribution_major_version|int >= 8
+      register: dnf_upgrade
+      ignore_errors: true
+
+    - name: Output dnf upgrade results
+      ansible.builtin.debug:
+        msg: "Dnf upgrade completed: {{ dnf_upgrade.changed | default(false) }}"
+      when: ansible_os_family == "RedHat" and ansible_distribution_major_version|int >= 8
+
+    - name: Check if reboot is required (Debian/Ubuntu)
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: reboot_required
+      when: ansible_os_family == "Debian"
+      ignore_errors: true
+
+    - name: Output reboot status
+      ansible.builtin.debug:
+        msg: "Reboot required: {{ reboot_required.stat.exists | default(false) }}"
+      when: ansible_os_family == "Debian"
+
+    - name: Reboot server if needed
+      ansible.builtin.reboot:
+        msg: "Rebooting after package updates"
+        reboot_timeout: 600
+      when: reboot_required.stat.exists | default(false)
+      ignore_errors: true

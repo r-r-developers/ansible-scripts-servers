@@ -1,18 +1,18 @@
 ---
-- name: Health Check Asustor NAS
+- name: Health Check Linux Server
   hosts: all
   become: true
   gather_facts: false
 
   tasks:
-    - name: Check system status
-      ansible.builtin.shell: /usr/sbin/aus -s
-      register: system_status
+    - name: Check system uptime
+      ansible.builtin.shell: uptime
+      register: system_uptime
       ignore_errors: true
 
-    - name: Output system status
+    - name: Output system uptime
       ansible.builtin.debug:
-        msg: "System status:\n{{ system_status.stdout }}"
+        msg: "System uptime:\n{{ system_uptime.stdout }}"
 
     - name: Check disk usage
       ansible.builtin.shell: df -h

@@ -1,21 +1,24 @@
 ---
-- name: Backup Asustor NAS Configuration
+- name: Backup Linux Server Configuration
   hosts: all
   become: true
   gather_facts: false
 
   tasks:
-    - name: Check backup utility
-      ansible.builtin.shell: which aus
+    - name: Check backup directory
+      ansible.builtin.file:
+        path: /var/backups
+        state: directory
+        mode: '0755'
       register: backup_check
       ignore_errors: true
 
-    - name: Output backup utility status
+    - name: Output backup directory status
       ansible.builtin.debug:
-        msg: "Backup utility found: {{ backup_check.stdout }}"
+        msg: "Backup directory ready"
 
     - name: Create configuration backup
-      ansible.builtin.shell: /usr/sbin/aus -b /volume1/backups/config-$(date +%Y%m%d).tar.gz
+      ansible.builtin.shell: tar -czf /var/backups/config-$(date +%Y%m%d).tar.gz /etc
       register: backup_result
       ignore_errors: true
 
@@ -24,7 +27,7 @@
         msg: "Backup result:\n{{ backup_result.stdout }}"
 
     - name: Verify backup created
-      ansible.builtin.shell: ls -lh /volume1/backups/config-*.tar.gz | tail -n 5
+      ansible.builtin.shell: ls -lh /var/backups/config-*.tar.gz | tail -n 5
       register: backup_list
       ignore_errors: true
 
