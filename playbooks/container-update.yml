@@ -1,7 +1,6 @@
 ---
 - name: Docker Container Management - Update Images and Restart Containers
   hosts: docker_hosts
-  become: yes
   gather_facts: yes
   
   vars:
@@ -36,6 +35,7 @@
         name: docker
         state: started
         enabled: yes
+      become: yes
 
     - name: Get list of running containers
       command: docker ps --format "{{ '{{' }}.Names{{ '}}' }}"
@@ -103,6 +103,7 @@
       register: prune_result
       when: prune_images | bool
       changed_when: "'Total reclaimed space' in prune_result.stdout"
+      become: yes
 
     - name: Display prune results
       debug:
