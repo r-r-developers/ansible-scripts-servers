@@ -1,0 +1,33 @@
+---
+- name: Health Check Asustor NAS
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Check system status
+      ansible.builtin.shell: /usr/sbin/aus -s
+      register: system_status
+      ignore_errors: true
+
+    - name: Output system status
+      ansible.builtin.debug:
+        msg: "System status:\n{{ system_status.stdout }}"
+
+    - name: Check disk usage
+      ansible.builtin.shell: df -h
+      register: disk_usage
+      ignore_errors: true
+
+    - name: Output disk usage
+      ansible.builtin.debug:
+        msg: "Disk usage:\n{{ disk_usage.stdout }}"
+
+    - name: Check running services
+      ansible.builtin.shell: systemctl list-units --type=service --state=running
+      register: running_services
+      ignore_errors: true
+
+    - name: Output running services
+      ansible.builtin.debug:
+        msg: "Running services:\n{{ running_services.stdout }}"

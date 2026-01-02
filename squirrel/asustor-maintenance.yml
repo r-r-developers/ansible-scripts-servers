@@ -1,0 +1,38 @@
+---
+- name: Asustor NAS Maintenance
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Clean package cache
+      ansible.builtin.shell: /usr/sbin/aus -c
+      register: clean_cache
+      ignore_errors: true
+
+    - name: Output cache cleanup result
+      ansible.builtin.debug:
+        msg: "Cache cleanup:\n{{ clean_cache.stdout }}"
+
+    - name: Check system logs
+      ansible.builtin.shell: journalctl -p err -n 50 --no-pager
+      register: error_logs
+      ignore_errors: true
+
+    - name: Output recent errors
+      ansible.builtin.debug:
+        msg: "Recent errors:\n{{ error_logs.stdout }}"
+
+    - name: Clean old log files
+      ansible.builtin.shell: find /var/log -type f -name "*.log" -mtime +30 -delete
+      register: log_cleanup
+      ignore_errors: true
+
+    - name: Optimize database
+      ansible.builtin.shell: /usr/sbin/aus -o
+      register: optimize_db
+      ignore_errors: true
+
+    - name: Output optimization result
+      ansible.builtin.debug:
+        msg: "Database optimization:\n{{ optimize_db.stdout }}"
