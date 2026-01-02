@@ -36,6 +36,7 @@
         state: started
         enabled: yes
       become: yes
+      ignore_errors: yes
 
     - name: Get list of running containers
       command: docker ps --format "{{ '{{' }}.Names{{ '}}' }}"
