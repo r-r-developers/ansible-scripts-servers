@@ -1,0 +1,166 @@
+---
+- name: Initial Server Setup and Configuration
+  hosts: all
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    # Create a new sudo user (leave empty to skip)
+    create_user: ""
+    # user_password: "{{ 'your_password' | password_hash('sha512') }}"
+    user_ssh_key: ""
+    
+    # Timezone configuration
+    server_timezone: "UTC"
+    
+    # Essential packages to install
+    essential_packages:
+      - vim
+      - git
+      - curl
+      - wget
+      - htop
+      - net-tools
+      - build-essential
+      - software-properties-common
+      - apt-transport-https
+      - ca-certificates
+      - gnupg
+      - lsb-release
+      - unzip
+      - zip
+      - rsync
+      - ufw
+      - fail2ban
+  
+  tasks:
+    - name: Update APT cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Set timezone
+      timezone:
+        name: "{{ server_timezone }}"
+
+    - name: Install essential packages
+      apt:
+        name: "{{ essential_packages }}"
+        state: present
+        update_cache: yes
+
+    - name: Create new sudo user (if specified)
+      user:
+        name: "{{ create_user }}"
+        shell: /bin/bash
+        groups: sudo
+        append: yes
+        create_home: yes
+        # password: "{{ user_password }}"
+      when: create_user | length > 0
+
+    - name: Add SSH key for new user (if specified)
+      authorized_key:
+        user: "{{ create_user }}"
+        key: "{{ user_ssh_key }}"
+        state: present
+      when: 
+        - create_user | length > 0
+        - user_ssh_key | length > 0
+
+    - name: Ensure sudo group has passwordless sudo
+      lineinfile:
+        path: /etc/sudoers
+        state: present
+        regexp: '^%sudo'
+        line: '%sudo ALL=(ALL) NOPASSWD: ALL'
+        validate: '/usr/sbin/visudo -cf %s'
+
+    - name: Disable root login via SSH
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^PermitRootLogin'
+        line: 'PermitRootLogin no'
+        state: present
+      notify: Restart SSH
+
+    - name: Disable password authentication (SSH key only)
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^PasswordAuthentication'
+        line: 'PasswordAuthentication no'
+        state: present
+      notify: Restart SSH
+
+    - name: Configure UFW defaults
+      ufw:
+        direction: "{{ item.direction }}"
+        policy: "{{ item.policy }}"
+      loop:
+        - { direction: 'incoming', policy: 'deny' }
+        - { direction: 'outgoing', policy: 'allow' }
+
+    - name: Allow SSH through UFW
+      ufw:
+        rule: allow
+        port: '22'
+        proto: tcp
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+
+    - name: Start and enable fail2ban
+      systemd:
+        name: fail2ban
+        state: started
+        enabled: yes
+
+    - name: Configure automatic security updates
+      apt:
+        name: unattended-upgrades
+        state: present
+
+    - name: Enable automatic security updates
+      copy:
+        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        content: |
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Unattended-Upgrade "1";
+          APT::Periodic::AutocleanInterval "7";
+
+    - name: Set hostname
+      hostname:
+        name: "{{ inventory_hostname }}"
+
+    - name: Update /etc/hosts with hostname
+      lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.1\.1'
+        line: "127.0.1.1 {{ inventory_hostname }}"
+        state: present
+
+    - name: Upgrade all packages
+      apt:
+        upgrade: dist
+        update_cache: yes
+
+    - name: Remove unnecessary packages
+      apt:
+        autoremove: yes
+        autoclean: yes
+
+    - name: Display server information
+      debug:
+        msg:
+          - "Server setup completed successfully!"
+          - "Hostname: {{ inventory_hostname }}"
+          - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "Kernel: {{ ansible_kernel }}"
+          - "IP Address: {{ ansible_default_ipv4.address }}"
+
+  handlers:
+    - name: Restart SSH
+      systemd:
+        name: sshd
+        state: restarted

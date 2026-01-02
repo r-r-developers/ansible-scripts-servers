@@ -1,0 +1,270 @@
+---
+- name: Security Hardening for Linux Servers
+  hosts: all
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    # SSH configuration
+    ssh_port: 22
+    ssh_max_auth_tries: 3
+    ssh_login_grace_time: 30
+    
+    # Fail2ban configuration
+    fail2ban_bantime: 3600
+    fail2ban_maxretry: 5
+    
+    # Additional ports to allow through firewall (add your custom ports)
+    allowed_tcp_ports: []
+    allowed_udp_ports: []
+  
+  tasks:
+    - name: Ensure security packages are installed
+      apt:
+        name:
+          - ufw
+          - fail2ban
+          - aide
+          - rkhunter
+          - lynis
+          - unattended-upgrades
+        state: present
+        update_cache: yes
+
+    # SSH Hardening
+    - name: Configure SSH - Disable empty passwords
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitEmptyPasswords'
+        line: 'PermitEmptyPasswords no'
+        state: present
+      notify: Restart SSH
+
+    - name: Configure SSH - Set MaxAuthTries
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?MaxAuthTries'
+        line: "MaxAuthTries {{ ssh_max_auth_tries }}"
+        state: present
+      notify: Restart SSH
+
+    - name: Configure SSH - Set LoginGraceTime
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?LoginGraceTime'
+        line: "LoginGraceTime {{ ssh_login_grace_time }}"
+        state: present
+      notify: Restart SSH
+
+    - name: Configure SSH - Disable X11 forwarding
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?X11Forwarding'
+        line: 'X11Forwarding no'
+        state: present
+      notify: Restart SSH
+
+    - name: Configure SSH - Use only SSH Protocol 2
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?Protocol'
+        line: 'Protocol 2'
+        state: present
+      notify: Restart SSH
+
+    - name: Configure SSH - Disable root login
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin no'
+        state: present
+      notify: Restart SSH
+
+    # Fail2ban Configuration
+    - name: Create fail2ban local jail configuration
+      copy:
+        dest: /etc/fail2ban/jail.local
+        content: |
+          [DEFAULT]
+          bantime = {{ fail2ban_bantime }}
+          findtime = 600
+          maxretry = {{ fail2ban_maxretry }}
+          
+          [sshd]
+          enabled = true
+          port = {{ ssh_port }}
+          logpath = %(sshd_log)s
+          backend = %(sshd_backend)s
+      notify: Restart Fail2ban
+
+    - name: Ensure fail2ban is started and enabled
+      systemd:
+        name: fail2ban
+        state: started
+        enabled: yes
+
+    # Firewall Configuration
+    - name: Reset UFW to default
+      ufw:
+        state: reset
+      ignore_errors: yes
+
+    - name: Configure UFW defaults
+      ufw:
+        direction: "{{ item.direction }}"
+        policy: "{{ item.policy }}"
+      loop:
+        - { direction: 'incoming', policy: 'deny' }
+        - { direction: 'outgoing', policy: 'allow' }
+        - { direction: 'routed', policy: 'deny' }
+
+    - name: Allow SSH through UFW
+      ufw:
+        rule: allow
+        port: "{{ ssh_port }}"
+        proto: tcp
+
+    - name: Allow custom TCP ports
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop: "{{ allowed_tcp_ports }}"
+      when: allowed_tcp_ports | length > 0
+
+    - name: Allow custom UDP ports
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: udp
+      loop: "{{ allowed_udp_ports }}"
+      when: allowed_udp_ports | length > 0
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+        logging: 'on'
+
+    # Kernel Hardening (sysctl)
+    - name: Configure kernel parameters for security
+      sysctl:
+        name: "{{ item.name }}"
+        value: "{{ item.value }}"
+        state: present
+        reload: yes
+        sysctl_file: /etc/sysctl.d/99-security.conf
+      loop:
+        # IP Forwarding (disable if not a router)
+        - { name: 'net.ipv4.ip_forward', value: '0' }
+        # Disable source packet routing
+        - { name: 'net.ipv4.conf.all.send_redirects', value: '0' }
+        - { name: 'net.ipv4.conf.default.send_redirects', value: '0' }
+        # Ignore ICMP redirects
+        - { name: 'net.ipv4.conf.all.accept_redirects', value: '0' }
+        - { name: 'net.ipv4.conf.default.accept_redirects', value: '0' }
+        - { name: 'net.ipv6.conf.all.accept_redirects', value: '0' }
+        - { name: 'net.ipv6.conf.default.accept_redirects', value: '0' }
+        # Ignore ICMP ping requests
+        - { name: 'net.ipv4.icmp_echo_ignore_all', value: '0' }
+        # Enable TCP SYN Cookie Protection
+        - { name: 'net.ipv4.tcp_syncookies', value: '1' }
+        # Log Martians (packets with impossible addresses)
+        - { name: 'net.ipv4.conf.all.log_martians', value: '1' }
+        # Ignore bogus ICMP errors
+        - { name: 'net.ipv4.icmp_ignore_bogus_error_responses', value: '1' }
+        # Enable source route verification
+        - { name: 'net.ipv4.conf.all.rp_filter', value: '1' }
+        - { name: 'net.ipv4.conf.default.rp_filter', value: '1' }
+
+    # Automatic Security Updates
+    - name: Configure unattended-upgrades
+      copy:
+        dest: /etc/apt/apt.conf.d/50unattended-upgrades
+        content: |
+          Unattended-Upgrade::Allowed-Origins {
+              "${distro_id}:${distro_codename}";
+              "${distro_id}:${distro_codename}-security";
+              "${distro_id}ESMApps:${distro_codename}-apps-security";
+              "${distro_id}ESM:${distro_codename}-infra-security";
+          };
+          Unattended-Upgrade::AutoFixInterruptedDpkg "true";
+          Unattended-Upgrade::MinimalSteps "true";
+          Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+          Unattended-Upgrade::Remove-Unused-Dependencies "true";
+          Unattended-Upgrade::Automatic-Reboot "false";
+
+    - name: Enable automatic security updates
+      copy:
+        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        content: |
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Unattended-Upgrade "1";
+          APT::Periodic::Download-Upgradeable-Packages "1";
+          APT::Periodic::AutocleanInterval "7";
+
+    # File System Security
+    - name: Set proper permissions on sensitive files
+      file:
+        path: "{{ item }}"
+        mode: '0600'
+        state: file
+      loop:
+        - /etc/ssh/sshd_config
+        - /etc/security/pwquality.conf
+      ignore_errors: yes
+
+    - name: Secure /tmp with noexec
+      mount:
+        path: /tmp
+        src: tmpfs
+        fstype: tmpfs
+        opts: defaults,noexec,nosuid,nodev
+        state: mounted
+      ignore_errors: yes
+
+    # Password Policy (if using passwords)
+    - name: Install libpam-pwquality for password strength
+      apt:
+        name: libpam-pwquality
+        state: present
+
+    - name: Configure password quality requirements
+      lineinfile:
+        path: /etc/security/pwquality.conf
+        regexp: "^{{ item.key }}"
+        line: "{{ item.key }} = {{ item.value }}"
+        state: present
+      loop:
+        - { key: 'minlen', value: '12' }
+        - { key: 'dcredit', value: '-1' }
+        - { key: 'ucredit', value: '-1' }
+        - { key: 'ocredit', value: '-1' }
+        - { key: 'lcredit', value: '-1' }
+
+    - name: Run security audit with Lynis (check only)
+      command: lynis audit system --quick --quiet
+      register: lynis_audit
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Display security hardening summary
+      debug:
+        msg:
+          - "Security hardening completed!"
+          - "SSH hardening: Applied"
+          - "Firewall (UFW): Enabled"
+          - "Fail2ban: Configured"
+          - "Kernel hardening: Applied"
+          - "Automatic updates: Enabled"
+          - "Run 'lynis audit system' for detailed security audit"
+
+  handlers:
+    - name: Restart SSH
+      systemd:
+        name: sshd
+        state: restarted
+
+    - name: Restart Fail2ban
+      systemd:
+        name: fail2ban
+        state: restarted

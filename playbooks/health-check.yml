@@ -1,0 +1,246 @@
+---
+- name: System Health Check and Monitoring
+  hosts: all
+  become: yes
+  gather_facts: yes
+  
+  vars:
+    # Alert thresholds
+    disk_warning_threshold: 80
+    disk_critical_threshold: 90
+    memory_warning_threshold: 80
+    memory_critical_threshold: 90
+    cpu_warning_threshold: 80
+    load_warning_multiplier: 1.5
+  
+  tasks:
+    - name: Gather system facts
+      setup:
+        gather_subset:
+          - hardware
+          - network
+          - virtual
+
+    - name: Check system uptime
+      command: uptime -p
+      register: uptime_output
+      changed_when: false
+
+    - name: Get load average
+      command: cat /proc/loadavg
+      register: load_avg
+      changed_when: false
+
+    - name: Check disk usage
+      shell: df -h / | tail -1 | awk '{print $5}' | sed 's/%//'
+      register: disk_usage
+      changed_when: false
+
+    - name: Get detailed disk usage by filesystem
+      shell: df -h | grep -vE '^Filesystem|tmpfs|cdrom'
+      register: disk_usage_detailed
+      changed_when: false
+
+    - name: Check memory usage
+      shell: free | grep Mem | awk '{print int($3/$2 * 100)}'
+      register: memory_usage
+      changed_when: false
+
+    - name: Get detailed memory information
+      command: free -h
+      register: memory_detailed
+      changed_when: false
+
+    - name: Check swap usage
+      shell: free | grep Swap | awk '{if ($2 > 0) print int($3/$2 * 100); else print 0}'
+      register: swap_usage
+      changed_when: false
+
+    - name: Get CPU information
+      command: lscpu
+      register: cpu_info
+      changed_when: false
+
+    - name: Check running processes count
+      shell: ps aux | wc -l
+      register: process_count
+      changed_when: false
+
+    - name: Get top 10 CPU consuming processes
+      shell: ps aux --sort=-%cpu | head -11
+      register: top_cpu_processes
+      changed_when: false
+
+    - name: Get top 10 memory consuming processes
+      shell: ps aux --sort=-%mem | head -11
+      register: top_mem_processes
+      changed_when: false
+
+    - name: Check if any services are failed
+      shell: systemctl list-units --state=failed --no-pager --no-legend | wc -l
+      register: failed_services_count
+      changed_when: false
+
+    - name: Get failed services details
+      command: systemctl list-units --state=failed --no-pager
+      register: failed_services
+      changed_when: false
+      when: failed_services_count.stdout | int > 0
+
+    - name: Check for required reboots
+      stat:
+        path: /var/run/reboot-required
+      register: reboot_required
+
+    - name: Check Docker status (if installed)
+      systemd:
+        name: docker
+      register: docker_status
+      ignore_errors: yes
+
+    - name: Get Docker containers status (if Docker is running)
+      command: docker ps -a --format "table {{ '{{' }}.Names{{ '}}' }}\t{{ '{{' }}.Status{{ '}}' }}\t{{ '{{' }}.State{{ '}}' }}"
+      register: docker_containers
+      when: docker_status is succeeded and docker_status.status.ActiveState == "active"
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Check last system logins
+      command: last -n 10
+      register: last_logins
+      changed_when: false
+
+    - name: Check for updates available
+      shell: apt list --upgradable 2>/dev/null | grep -v "Listing" | wc -l
+      register: updates_available
+      changed_when: false
+
+    - name: Check network connectivity
+      command: ping -c 3 8.8.8.8
+      register: network_check
+      changed_when: false
+      ignore_errors: yes
+
+    # Analysis and Alerts
+    - name: Evaluate disk usage status
+      set_fact:
+        disk_status: "{{ 'CRITICAL' if (disk_usage.stdout | int) >= disk_critical_threshold else ('WARNING' if (disk_usage.stdout | int) >= disk_warning_threshold else 'OK') }}"
+
+    - name: Evaluate memory usage status
+      set_fact:
+        memory_status: "{{ 'CRITICAL' if (memory_usage.stdout | int) >= memory_critical_threshold else ('WARNING' if (memory_usage.stdout | int) >= memory_warning_threshold else 'OK') }}"
+
+    - name: Calculate expected load average threshold
+      set_fact:
+        load_threshold: "{{ (ansible_processor_vcpus | float * load_warning_multiplier) | float }}"
+
+    - name: Get current load average (1 min)
+      set_fact:
+        current_load: "{{ load_avg.stdout.split()[0] | float }}"
+
+    - name: Evaluate load average status
+      set_fact:
+        load_status: "{{ 'WARNING' if current_load | float > load_threshold | float else 'OK' }}"
+
+    # Display Health Check Summary
+    - name: Display system health summary
+      debug:
+        msg:
+          - "=========================================="
+          - "SYSTEM HEALTH CHECK REPORT"
+          - "Server: {{ inventory_hostname }}"
+          - "=========================================="
+          - ""
+          - "SYSTEM INFORMATION:"
+          - "  OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "  Kernel: {{ ansible_kernel }}"
+          - "  Architecture: {{ ansible_architecture }}"
+          - "  Uptime: {{ uptime_output.stdout }}"
+          - "  IP Address: {{ ansible_default_ipv4.address | default('N/A') }}"
+          - ""
+          - "RESOURCE USAGE:"
+          - "  Disk Usage: {{ disk_usage.stdout }}% [{{ disk_status }}]"
+          - "  Memory Usage: {{ memory_usage.stdout }}% [{{ memory_status }}]"
+          - "  Swap Usage: {{ swap_usage.stdout }}%"
+          - "  Load Average: {{ current_load }} ({{ ansible_processor_vcpus }} CPUs) [{{ load_status }}]"
+          - "  Running Processes: {{ process_count.stdout }}"
+          - ""
+          - "SYSTEM STATUS:"
+          - "  Failed Services: {{ failed_services_count.stdout }}"
+          - "  Reboot Required: {{ 'YES' if reboot_required.stat.exists else 'NO' }}"
+          - "  Updates Available: {{ updates_available.stdout }}"
+          - "  Network Status: {{ 'OK' if network_check.rc == 0 else 'FAILED' }}"
+
+    - name: Display detailed disk usage
+      debug:
+        msg: "{{ disk_usage_detailed.stdout_lines }}"
+
+    - name: Display detailed memory information
+      debug:
+        msg: "{{ memory_detailed.stdout_lines }}"
+
+    - name: Display top CPU consuming processes
+      debug:
+        msg: "{{ top_cpu_processes.stdout_lines }}"
+
+    - name: Display top memory consuming processes
+      debug:
+        msg: "{{ top_mem_processes.stdout_lines }}"
+
+    - name: Display failed services (if any)
+      debug:
+        msg: "{{ failed_services.stdout_lines }}"
+      when: failed_services_count.stdout | int > 0
+
+    - name: Display Docker containers status
+      debug:
+        msg: "{{ docker_containers.stdout_lines }}"
+      when: docker_containers is defined and docker_containers.stdout is defined
+
+    - name: Alert on critical disk usage
+      debug:
+        msg: "!!! CRITICAL: Disk usage is at {{ disk_usage.stdout }}% (threshold: {{ disk_critical_threshold }}%)"
+      when: disk_status == "CRITICAL"
+
+    - name: Alert on critical memory usage
+      debug:
+        msg: "!!! CRITICAL: Memory usage is at {{ memory_usage.stdout }}% (threshold: {{ memory_critical_threshold }}%)"
+      when: memory_status == "CRITICAL"
+
+    - name: Alert on high load average
+      debug:
+        msg: "!!! WARNING: Load average {{ current_load }} exceeds threshold {{ load_threshold }}"
+      when: load_status == "WARNING"
+
+    - name: Create health check report file
+      copy:
+        dest: "/tmp/health-check-{{ inventory_hostname }}-{{ ansible_date_time.date }}.txt"
+        content: |
+          SYSTEM HEALTH CHECK REPORT
+          Generated: {{ ansible_date_time.iso8601 }}
+          Server: {{ inventory_hostname }}
+          
+          SYSTEM INFORMATION:
+          OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          Kernel: {{ ansible_kernel }}
+          Architecture: {{ ansible_architecture }}
+          Uptime: {{ uptime_output.stdout }}
+          
+          RESOURCE USAGE:
+          Disk Usage: {{ disk_usage.stdout }}% [{{ disk_status }}]
+          Memory Usage: {{ memory_usage.stdout }}% [{{ memory_status }}]
+          Swap Usage: {{ swap_usage.stdout }}%
+          Load Average: {{ current_load }} ({{ ansible_processor_vcpus }} CPUs) [{{ load_status }}]
+          Running Processes: {{ process_count.stdout }}
+          
+          SYSTEM STATUS:
+          Failed Services: {{ failed_services_count.stdout }}
+          Reboot Required: {{ 'YES' if reboot_required.stat.exists else 'NO' }}
+          Updates Available: {{ updates_available.stdout }}
+          Network Status: {{ 'OK' if network_check.rc == 0 else 'FAILED' }}
+          
+          {{ '=' * 60 }}
+
+    - name: Report location of health check file
+      debug:
+        msg: "Health check report saved to /tmp/health-check-{{ inventory_hostname }}-{{ ansible_date_time.date }}.txt"
