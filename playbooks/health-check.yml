@@ -109,6 +109,7 @@
       command: last -n 10
       register: last_logins
       changed_when: false
+      ignore_errors: yes
 
     - name: Check for updates available
       shell: apt list --upgradable 2>/dev/null | grep -v "Listing" | wc -l
