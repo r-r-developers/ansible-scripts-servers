@@ -214,7 +214,7 @@
 
     - name: Create health check report file
       copy:
-        dest: "/tmp/health-check-{{ inventory_hostname }}-{{ ansible_date_time.date }}.txt"
+        dest: "/home/rustin/health-check-{{ inventory_hostname }}-{{ ansible_date_time.date }}.txt"
         content: |
           SYSTEM HEALTH CHECK REPORT
           Generated: {{ ansible_date_time.iso8601 }}
@@ -243,4 +243,4 @@
 
     - name: Report location of health check file
       debug:
-        msg: "Health check report saved to /tmp/health-check-{{ inventory_hostname }}-{{ ansible_date_time.date }}.txt"
+        msg: "Health check report saved to /home/rustin/health-check-{{ inventory_hostname }}-{{ ansible_date_time.date }}.txt"
